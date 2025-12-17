@@ -2,9 +2,7 @@
 
 "use strict";
 
-import {Objects} from "./Objects.mjs";
-
-export class HTML {
+class HTML {
 
     /**
      * Pass-thru for document.createTextNode(). Creates a new Text node. This method can be used to escape HTML characters.
@@ -27,12 +25,12 @@ export class HTML {
     /**
      * Sets the style of an element using the supplied style object. NOTE: Existing styles will be maintained if not overridden by the style object provided.
      * @param {HTMLElement} element The HTML element whose style will be modified.
-     * @param {Object.<string, string>} style The style properties to be merged into the element's style.
+     * @param {object} style The style properties to be merged into the element's style.
      */
     static SetStyle(element, style) {
 
         // Load Style Object
-        let styleObject = HTML.StyleRuleToObject(Objects.ValueWithDefault(element.getAttribute("style"), ""));
+        let styleObject = HTML.StyleRuleToObject(element.getAttribute("style") ?? "");
 
         // Modify Style Attributes
         for (let propertyName in style) {
@@ -64,11 +62,24 @@ export class HTML {
 
         let node = tempDiv.firstChild;
 
-        children.push(node);
+        if (node instanceof Element) {            
 
-        while (node.nextElementSibling != null) {
-            children.push(node.nextSibling);
-            node = node.nextSibling;
+            children.push(node);
+
+            /** @type {Element} */ let element = node;
+
+            while (element !== null && element.nextElementSibling != null) {
+
+                children.push(element.nextSibling);
+
+                const childNode = element.nextSibling;
+
+                if (childNode instanceof Element) {
+                    element = childNode;
+                } else {
+                    element = null;
+                }
+            }
         }
 
         return children;
@@ -237,13 +248,14 @@ export class HTML {
 
     /**
      * Creates an HTML element for the specified tag. Note: the element is not added to the document.
-     * @param {string} tag The HTML element type (tag) to be created.
-     * @param {Object.<string, object>} attributes An object whose keys will be used to set attributes of the element, such as HREF or SRC. Note that a Style attribute can be passed in as an object, but all other attributes will be handled as strings.
-     * @param {Object.<string, any>} style An object whose keys will be used to set style declarations of the element. This parameter can be included in the attributes object, and if style declarations are specified here and also in the attributes parameter, the style declarations will be merged, with the `style` parameter's declarations taking priority.
-     * @param {Object.<string, object>} properties An object whose keys will be used to set properties of the element, such as innerHTML or innerText.
-     * @param {Array.<HTMLElement>} children An array of HTMLElements which will be registered as child elements for the new element.
-     * @param {HTMLElementEventMap} events An object whose keys will be used to create event listeners for the new element.
-     * @param {function(HTMLElement)} inlineModifier A callback allowing custom in-line modification of the element. One example use is to grab a reference to the specific element rather than having to create the element externally and pass it in.
+     * @param {object} def A JavaScript object representing the definition of the HTML element to be created.
+     * @param {string} def.tag The HTML element type (tag) to be created.
+     * @param {Object.<string, object>} [def.attributes] An object whose keys will be used to set attributes of the element, such as HREF or SRC. Note that a Style attribute can be passed in as an object, but all other attributes will be handled as strings.
+     * @param {Object.<string, any>} [def.style] An object whose keys will be used to set style declarations of the element. This parameter can be included in the attributes object, and if style declarations are specified here and also in the attributes parameter, the style declarations will be merged, with the `style` parameter's declarations taking priority.
+     * @param {Object.<string, object>} [def.properties] An object whose keys will be used to set properties of the element, such as innerHTML or innerText.
+     * @param {Array.<HTMLElement>} [def.children] An array of HTMLElements which will be registered as child elements for the new element.
+     * @param {Object.<string, (event: Event) => void>} [def.events] An object whose keys will be used to create event listeners for the new element.
+     * @param {(element: HTMLElement) => void} [def.inlineModifier] A callback allowing custom in-line modification of the element. One example use is to grab a reference to the specific element rather than having to create the element externally and pass it in.
      * @returns {HTMLElement}
      */
     static Create({tag, attributes = null, style = null, properties = null, children = null, events = null, inlineModifier = null}) {
@@ -316,8 +328,8 @@ export class HTML {
 
     /**
      * Converts a Style-rule string into an object representing Style declarations.
-     * @param styleString The style-rule string containing styling declarations.
-     * @returns {{}} An object representing Style declarations.
+     * @param {string} styleString The style-rule string containing styling declarations.
+     * @returns {object} An object representing Style declarations.
      */
     static StyleRuleToObject(styleString) {
 
@@ -368,12 +380,12 @@ export class HTML {
 
     /**
      * Converts an object representing Style declarations into a Style-rule string.
-     * @param styleObj The object containing style declarations. If this parameter is not an object, the parameter is returned immediately, with the assumption it is already a string formatted as a style rule.
+     * @param {object} styleObj The object containing style declarations. If this parameter is not an object, the parameter is returned immediately, with the assumption it is already a string formatted as a style rule.
      * @returns {*|string} A style-rule string consisting of style declarations separated by semicolons.
      */
     static ObjectToStyleRule(styleObj) {
 
-        if (!Objects.isObject(styleObj)) return styleObj;
+        if (!(typeof styleObj === 'object' && styleObj !== null)) return styleObj;
 
         let sb = [];
 
@@ -386,7 +398,7 @@ export class HTML {
 
     /**
      * Gets the minimum and maximum numeric z-indexes of a parent element's children using computed styles.
-     * @param parentElement The parent element to evaluate for z-indexes.
+     * @param {HTMLElement} parentElement The parent element to evaluate for z-indexes.
      * @returns {{min: number, max: number}}
      */
     static GetZIndexRange(parentElement) {
