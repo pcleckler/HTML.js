@@ -1,12 +1,8 @@
-// noinspection JSUnusedGlobalSymbols
-
-"use strict";
-
 class HTML {
 
     /**
      * Pass-thru for document.createTextNode(). Creates a new Text node. This method can be used to escape HTML characters.
-     * @param data A string containing the data to be put in the text node.
+     * @param {string} data A string containing the data to be put in the text node.
      * @returns {Text} A Text node.
      */
     static CreateTextNode(data) {
@@ -25,11 +21,12 @@ class HTML {
     /**
      * Sets the style of an element using the supplied style object. NOTE: Existing styles will be maintained if not overridden by the style object provided.
      * @param {HTMLElement} element The HTML element whose style will be modified.
-     * @param {object} style The style properties to be merged into the element's style.
+     * @param {Object.<string, string>} style The style properties to be merged into the element's style.
      */
     static SetStyle(element, style) {
 
         // Load Style Object
+        /** @type {Object.<string, any>} */
         let styleObject = HTML.StyleRuleToObject(element.getAttribute("style") ?? "");
 
         // Modify Style Attributes
@@ -50,7 +47,7 @@ class HTML {
     /**
      * Creates an element from the specified HTML string. Note: the element is not added to the document.
      * @param {string} htmlString
-     * @returns {Node[]}
+     * @returns {ChildNode[]}
      */
     static FromHtml(htmlString) {
 
@@ -58,6 +55,7 @@ class HTML {
 
         tempDiv.innerHTML = htmlString.trim();
 
+        /** @type {ChildNode[]} */
         let children = [];
 
         let node = tempDiv.firstChild;
@@ -66,13 +64,14 @@ class HTML {
 
             children.push(node);
 
-            /** @type {Element} */ let element = node;
+            /** @type {Element?} */ let element = node;
 
             while (element !== null && element.nextElementSibling != null) {
 
-                children.push(element.nextSibling);
-
+                /** @type {ChildNode?} */
                 const childNode = element.nextSibling;
+
+                if (childNode !== null) children.push(childNode);
 
                 if (childNode instanceof Element) {
                     element = childNode;
@@ -85,177 +84,263 @@ class HTML {
         return children;
     }
 
-    static #ObjectToElement(obj, subs, parentElement = null) {
+    /**
+     * Compose a DOM element from a source object. Full syntax specification in README.md associated with this library. **Syntax below**.
+     * 
+     * @param {Object.<string, any>} source A JavaScript object that defines the source of the element. Full syntax specification in README.md associated with this library.
+     * @returns {Element} An element composed from the source definition.
+     * 
+     * ---
+     * 
+     * **Syntax**
+     * 
+     * ```text
+     * tagName ::= any valid HTML/SVG/MathML tag name, optionally prefixed with a namespace: "namespace:tag"
+     * 
+     * source  ::= elementObject          elementObject ::= { tagName: config }
+     * 
+     * config  ::= object | source[]      object        ::= { key: value, ... }
+     * ````
+     * 
+     * **Key/Value Semantics**
+     * 
+     * ```text
+     *   $children       - object or array representing child elements
+     *   $inlineModifier - function(element) called after attributes/events/children applied
+     *   any other key:
+     *       - value is function - attach as event listener (key = event name)
+     *       - value is array    - treated as children
+     *       - otherwise         - apply as property or attribute
+     * ```
+     */
 
-        const PreProcessedKeys = {
-            style: "style",
-            attributes: "attributes",
+    /**
+     * Compose a DOM element from a source object, an existing Element, or a Text node.
+     *
+     * @param {(
+     *   {
+     *     [tagName: string]: (
+     *       {
+     *         style?: object | string,
+     *         class?: string,
+     *         $children?: (Object|Element|Text) | Array<Object|Element|Text>,
+     *         $inlineModifier?: (el: Element) => void,
+     *         [key: string]: any
+     *       } | Array<Object|Element|Text> | Element | Text
+     *     )
+     *   }
+     * )} source The element source definition.
+     *
+     * @returns {Element} The composed DOM element.
+     * 
+     * **Extended Backus-Naur Form**
+     * 
+     * ```text
+     * source        ::= elementObject
+     *
+     * elementObject ::= { tagName: config }
+     *
+     * tagName       ::= any valid HTML/SVG/MathML tag name
+     *                  optionally prefixed with a namespace: "prefix:tag"
+     *
+     * config        ::= object
+     *                 | array   // array shorthand → children
+     *
+     * object        ::= { key: value, ... }
+     *
+     * key/value semantics:
+     *
+     *   style           → applied via HTML.SetStyle(element, value)
+     *   class           → space-separated string, added to element.classList
+     *   $children       → object, Element, Text, or array representing child elements
+     *   $inlineModifier → function(element) called after children, attributes, events, style/class applied
+     *   any other key:
+     *       - value is function → attach as event listener (key = event name)
+     *       - value is array    → treated as children
+     *       - otherwise         → apply as property or attribute
+     * ```
+     */
+    static Compose(source) {
+
+        if (source == null) {
+            throw new Error("No composition source provided.");
+        }
+
+        if (typeof source === "object") {
+
+            const [tag, config] = Object.entries(source)[0];
+
+            const element = this.#ComposeCreateElementFromTag(tag);
+
+            // Helper to process a child (Element, Text, string, or object)
+            const appendChild = (/** @type {Element|Text|Object.<string, any>} */ child) => {
+
+                if (child instanceof Element || child instanceof Text) {
+                    element.appendChild(child);
+                } else if (typeof child === "object") {
+                    element.appendChild(this.Compose(child));
+                }
+            };
+
+            // Array shorthand - multiple children
+            if (Array.isArray(config)) {
+                for (const child of config) {
+                    appendChild(child);
+                }
+            }
+            // Object config - process keys
+            else if (config && typeof config === "object") {
+
+                for (const [key, value] of Object.entries(config)) {
+
+                    if (key === "style") {
+
+                        if (!(element instanceof HTMLElement)) continue;
+
+                        HTML.SetStyle(element, value);
+                    }
+                    else if (key === "class") {
+
+                        const classList = String(value).split(" ");
+
+                        for (const className of classList) {
+                            element.classList.add(className);
+                        }
+                    }
+                    else if (key === "$children") {
+                        if (Array.isArray(value)) {
+                            for (const child of value) appendChild(child);
+                        } else {
+                            appendChild(value);
+                        }
+                    }
+                    else if (key === "$inlineModifier") {
+                        // Skip for now, call after loop
+                        continue;
+                    }
+                    else if (typeof value === "function") {
+                        element.addEventListener(key, value);
+                    }
+                    else if (Array.isArray(value)) {
+                        for (const child of value) appendChild(child);
+                    }
+                    else {
+                        this.#ComposeApplyAttributeOrProperty(element, key, value);
+                    }
+                }
+
+                // Call inline modifier if present
+                if ("$inlineModifier" in config && typeof config["$inlineModifier"] === "function") {
+                    config["$inlineModifier"](element);
+                }
+            }
+
+            return element;
+        }
+
+        throw new Error("Invalid composition source.");
+    }
+
+
+    /**
+     * @param {string} tagSpec Tag names can include a namespace. Format: <namespace>:<tag>
+     * @returns {Element}
+     */
+    static #ComposeCreateElementFromTag(tagSpec) {
+
+        if (tagSpec == null) {
+            throw new Error("No tag specification provided.")
+        }
+
+        tagSpec = tagSpec.toLowerCase();
+
+        /** @type {Object.<string, string>} */
+        const nsMap = {
+            svg: "http://www.w3.org/2000/svg",
+            math: "http://www.w3.org/1998/Math/MathML"
         };
 
-        function subst(value) {
+        const lastColon = tagSpec.lastIndexOf(":");
 
-            if (typeof value === 'string') {
-                if (value in subs) {
-                    return subs[value];
-                }
-            } else if (value instanceof HTMLElement) {
-                return value;
-            } else if (typeof value === 'object') {
-                for (const key in value) {
-                    // Only attempt here. Attributes/properties may be read-only
-                    try {
-                        value[key] = subst(value[key]);
-                    } catch {}
-                }
+        let namespace = null;
+        let tag = tagSpec;
+
+        if (lastColon > 0) {
+
+            namespace = tagSpec.slice(0, lastColon);
+
+            tag = tagSpec.slice(lastColon + 1);
+
+            if (!(namespace.includes("/") || namespace.includes(":"))) {
+
+                // This is a prefix like "svg" or "math"
+                namespace = nsMap[namespace];
+
+                if (!namespace) throw new Error(`Unknown namespace prefix: ${namespace}`);
             }
+        } else { // Hard-coded detection for common SVG/MathML tags if no prefix is given
 
-            return value;
+            const svgTags = new Set([
+                "svg","circle","rect","ellipse","line","polygon","polyline",
+                "path","g","text","tspan","defs","use","clipPath","mask",
+                "symbol","marker"
+            ]);
+
+            const mathTags = new Set([
+                "math","mi","mn","mo","mfrac","msqrt","msub","msup",
+                "msubsup","mrow","mtable","mtr","mtd"
+            ]);
+
+            if (svgTags.has(tag)) namespace = nsMap["svg"];
+
+            else if (mathTags.has(tag)) namespace = nsMap["math"];
         }
 
-        // HTMLCollections cannot be created, so a host element is required for manipulation
-        if (parentElement == null) {
-            parentElement = document.createElement("div");
-        }
-
-        // Ensure substitution dictionary is available
-        if (subs == null) {
-            subs = {};
-        }
-
-        // Exit early
-        if (obj instanceof HTMLElement) {
-            parentElement.append(obj);
-            return parentElement;
-        }
-
-        if (obj == null) {
-            return parentElement;
-        }
-
-        if (Array.isArray(obj)) {
-            for (let i = 0; i < obj.length; i++) {
-                HTML.#ObjectToElement(obj[i], subs, parentElement);
-            }
-
-            return parentElement;
-        }
-
-        // Merge Style and Attributes When Both Are specified
-        let attributes = {};
-        let style = {};
-
-        if (PreProcessedKeys.attributes in obj) {
-            attributes = subst(obj[PreProcessedKeys.attributes]);
-        }
-
-        if (PreProcessedKeys.style in obj) {
-            style = subst(obj[PreProcessedKeys.style]);
-        }
-
-        if (PreProcessedKeys.style in attributes) {
-
-            const inlineStyle = HTML.StyleRuleToObject(HTML.ObjectToStyleRule(attributes[PreProcessedKeys.style]));
-
-            Object.assign(inlineStyle, style);
-
-            delete attributes[PreProcessedKeys.attributes];
-        }
-
-        // Process Pre-processed Keys
-        for (let attribName in attributes) {
-            parentElement.setAttribute(attribName, `${attributes[attribName]}`);
-        }
-
-        if (Object.keys(style).length > 0) {
-            HTML.SetStyle(parentElement, style);
-        }
-
-        // Process Other Keys
-        for (const key in obj) {
-
-            if (Object.keys(PreProcessedKeys).includes(key)) continue;
-
-            let value = subst(obj[key]);
-
-            if (key === "children") {
-
-                for (let i = 0; i < value.length; i++) {
-                    HTML.#ObjectToElement(value[i], subs, parentElement);
-                }
-
-            } else if (key === "properties") {
-
-                for (let propName in value) {
-                    parentElement[propName] = value[propName];
-                }
-
-            } else if (key === "events") {
-
-                for (let eventName in value) {
-                    parentElement.addEventListener(eventName, value[eventName]);
-                }
-
-            } else if (key === "inlineModifier") {
-
-                value(parentElement);
-
-            } else if (key === "text") {
-
-                    parentElement.append(HTML.CreateTextNode(value));
-
-            } else {
-                parentElement.append(HTML.#ObjectToElement(value, subs, document.createElement(key)));
-            }
-        }
-
-        return parentElement;
+        return namespace ? document.createElementNS(namespace, tag) : document.createElement(tag);
     }
 
     /**
-     * Converts a JavaScript object into an array of HTMLElements.
-     * @param {object} obj Object containing specific keys or other objects that will be used to generate HTML elements.
-     * @return HTMLElement[]
+     * Applies a value to the specified property of an element.
+     * @param {Element} element Element to be modified.
+     * @param {string} propertyName Name of property to be modified.
+     * @param {any} value Value to assign to the property.
      */
-    static FromObject(obj) {
+    static SetElementProperty(element, propertyName, value) {
+        /** @type {any} */
+        const elementAsAny = element;
 
-        // This function expects arrays only.
-        if (!Array.isArray(obj)) {
-            obj = [obj];
+        elementAsAny[propertyName] = value;
+    }
+
+    
+    /**
+     * Set either a property or attribute value.
+     * 
+     * @param {Element} element 
+     * @param {string} key 
+     * @param {any} value 
+     */
+    static #ComposeApplyAttributeOrProperty(element, key, value) {
+        
+        if (key in element) {
+
+            HTML.SetElementProperty(element, key, value);
+
+        } else {
+            element.setAttribute(key, String(value));
         }
-
-        let elementList = [];
-
-        for (let i = 0; i < obj.length; i++) {
-
-            let childObj = obj[i];
-
-            if (typeof childObj === 'object') {
-
-                if ("tag" in childObj) {
-
-                    // Substitute children for actual HTMLElements
-                    if ("children" in childObj && !(childObj.children[0] instanceof HTMLElement)) {
-                        childObj.children = HTML.FromObject(childObj.children);
-                    }
-
-                    elementList.push(HTML.Create(childObj));
-                }
-            }
-        }
-
-        return elementList;
     }
 
     /**
      * Creates an HTML element for the specified tag. Note: the element is not added to the document.
      * @param {object} def A JavaScript object representing the definition of the HTML element to be created.
      * @param {string} def.tag The HTML element type (tag) to be created.
-     * @param {Object.<string, object>} [def.attributes] An object whose keys will be used to set attributes of the element, such as HREF or SRC. Note that a Style attribute can be passed in as an object, but all other attributes will be handled as strings.
-     * @param {Object.<string, any>} [def.style] An object whose keys will be used to set style declarations of the element. This parameter can be included in the attributes object, and if style declarations are specified here and also in the attributes parameter, the style declarations will be merged, with the `style` parameter's declarations taking priority.
-     * @param {Object.<string, object>} [def.properties] An object whose keys will be used to set properties of the element, such as innerHTML or innerText.
-     * @param {Array.<HTMLElement>} [def.children] An array of HTMLElements which will be registered as child elements for the new element.
-     * @param {Object.<string, (event: Event) => void>} [def.events] An object whose keys will be used to create event listeners for the new element.
-     * @param {(element: HTMLElement) => void} [def.inlineModifier] A callback allowing custom in-line modification of the element. One example use is to grab a reference to the specific element rather than having to create the element externally and pass it in.
+     * @param {Object.<string, any>?} [def.attributes] An object whose keys will be used to set attributes of the element, such as HREF or SRC. Note that a Style attribute can be passed in as an object, but all other attributes will be handled as strings.
+     * @param {Object.<string, any>?} [def.style] An object whose keys will be used to set style declarations of the element. This parameter can be included in the attributes object, and if style declarations are specified here and also in the attributes parameter, the style declarations will be merged, with the `style` parameter's declarations taking priority.
+     * @param {Object.<string, any>?} [def.properties] An object whose keys will be used to set properties of the element, such as innerHTML or innerText.
+     * @param {Array.<HTMLElement>?} [def.children] An array of HTMLElements which will be registered as child elements for the new element.
+     * @param {Object.<string, (event: Event) => void>?} [def.events] An object whose keys will be used to create event listeners for the new element.
+     * @param {((element: HTMLElement) => void)?} [def.inlineModifier] A callback allowing custom in-line modification of the element. One example use is to grab a reference to the specific element rather than having to create the element externally and pass it in.
      * @returns {HTMLElement}
      */
     static Create({tag, attributes = null, style = null, properties = null, children = null, events = null, inlineModifier = null}) {
@@ -275,6 +360,7 @@ class HTML {
                 attributes[styleKey] = HTML.StyleRuleToObject(HTML.ObjectToStyleRule(attributes[styleKey]));
 
                 Object.assign(attributes[styleKey], style);
+                
             } else {
                 attributes[styleKey] = style;
             }
@@ -306,7 +392,8 @@ class HTML {
         }
 
         for (let propName in properties) {
-            element[propName] = properties[propName];
+
+            HTML.SetElementProperty(element, propName, properties[propName]);
         }
 
         for (let childIndex = 0; childIndex < children.length; childIndex++) {
@@ -333,6 +420,7 @@ class HTML {
      */
     static StyleRuleToObject(styleString) {
 
+        /** @type {Object.<string, any>} */
         let styleObj = {};
 
         if (styleString.length < 1) return styleObj;
@@ -380,7 +468,7 @@ class HTML {
 
     /**
      * Converts an object representing Style declarations into a Style-rule string.
-     * @param {object} styleObj The object containing style declarations. If this parameter is not an object, the parameter is returned immediately, with the assumption it is already a string formatted as a style rule.
+     * @param {any} styleObj The object containing style declarations. If this parameter is not an object, the parameter is returned immediately, with the assumption it is already a string formatted as a style rule.
      * @returns {*|string} A style-rule string consisting of style declarations separated by semicolons.
      */
     static ObjectToStyleRule(styleObj) {

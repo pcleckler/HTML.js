@@ -1,0 +1,10 @@
+{
+    "compilerOptions": {
+        "checkJs": true,
+        "target": "esNext",
+        "strict": true
+    },
+    "include": [
+        "**/*.js"
+    ]
+}
